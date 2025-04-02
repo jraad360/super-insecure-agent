@@ -1,6 +1,28 @@
 # Super Insecure Agent
 
-A Node.js and TypeScript-based AI agent using OpenAI's latest APIs.
+A Node.js and TypeScript-based AI agent using OpenAI's latest APIs, designed to demonstrate AI agent security vulnerabilities.
+
+## About This Project
+
+This project was created to demonstrate AI Agent security vulnerabilities such as memory injection for the OWASP Gen AI Security Project's NYC Insecure Agents Hackathon (April 1, 2025). The purpose is to showcase potential security threats in agentic AI systems and contribute to the OWASP Agentic Security Initiative's efforts to educate the community about top agentic threats.
+
+The hackathon was supported by several organizations including Pensar, Pydantic, SpIxAI, and Mastra, with teams from security vendors like Pensar helping participants identify vulnerabilities in their agent implementations.
+
+The repository serves as an educational tool to understand how vulnerabilities in AI agents can be exploited, helping developers build more secure AI systems in the future.
+
+## Security Vulnerabilities Demonstrated
+
+This project intentionally includes vulnerabilities for educational purposes:
+
+### Memory Injection
+
+The agent implementation demonstrates how an attacker can manipulate the agent's memory, potentially causing it to:
+
+- Remember false information about users
+- Make decisions based on injected memories
+- Leak sensitive information stored in memory
+
+These vulnerabilities are aligned with the threats identified in the OWASP Agentic Security Initiative's Threats and Mitigations Guide.
 
 ## Project Structure
 
@@ -105,6 +127,16 @@ curl -X POST http://localhost:3000/api/agent/function-call \
     ]
   }'
 ```
+
+## Disclaimer
+
+This project contains intentionally vulnerable code for educational purposes only. Do not use this code in production environments. The vulnerabilities demonstrated here are meant to raise awareness about security issues in AI agent implementations.
+
+## References
+
+- [OWASP Agentic Security Initiative](https://owasp.org/www-project-agentic-security/)
+- [OWASP Gen AI Security Project](https://owasp.org/www-project-gen-ai-security/)
+- [OWASP Agentic Security Threats and Mitigations Guide](https://owasp.org/www-project-agentic-security/resources)
 
 ## License
 

@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { AgentService } from "../services/agent.service";
 import { Logger } from "../utils/logger";
+import { ChatCompletionChunk } from "openai/resources";
 
 export class AgentController {
   private agentService: AgentService;
@@ -14,7 +15,7 @@ export class AgentController {
    */
   async getResponse(req: Request, res: Response): Promise<void> {
     try {
-      const { input, instructions, model, useMemory } = req.body;
+      const { input, instructions, model, useMemory, sessionId } = req.body;
 
       if (!input) {
         res.status(400).json({ error: "Input is required" });
@@ -26,9 +27,15 @@ export class AgentController {
         ? await this.agentService.generateResponseWithMemory(
             input,
             instructions,
-            model
+            model,
+            sessionId
           )
-        : await this.agentService.generateResponse(input, instructions, model);
+        : await this.agentService.generateResponse(
+            input,
+            instructions,
+            model,
+            sessionId
+          );
 
       res.status(200).json(response);
     } catch (error) {
@@ -45,7 +52,7 @@ export class AgentController {
    */
   async streamResponse(req: Request, res: Response): Promise<void> {
     try {
-      const { input, instructions, model } = req.body;
+      const { input, instructions, model, sessionId } = req.body;
 
       if (!input) {
         res.status(400).json({ error: "Input is required" });
@@ -60,43 +67,75 @@ export class AgentController {
       const stream = await this.agentService.streamResponse(
         input,
         instructions,
-        model
+        model,
+        sessionId
       );
 
       let completeResponse = "";
 
       // Handle streaming response
       for await (const chunk of stream) {
-        // Convert chunk to a simple data format that the client can handle
-        const chunkData: any = {
-          type: chunk.type,
+        // Determine the chunk type and create formatted data for client
+        let chunkData: any = {
           done: false,
         };
 
-        // Add relevant data based on chunk type
-        if (chunk.type.includes("delta")) {
-          chunkData.content = "delta" in chunk ? chunk.delta : "";
-          // Accumulate the response for memory updates later
-          if (chunkData.content) {
-            completeResponse += chunkData.content;
-          }
-        } else if (chunk.type.includes("done")) {
-          chunkData.done = true;
+        // Handle ResponseStreamEvent (from OpenAI Responses API)
+        if ("type" in chunk) {
+          chunkData.type = chunk.type;
 
-          // After stream is done, update memory with the complete response
-          try {
-            const memoryUpdateResult =
-              await this.agentService.updateMemoryAfterStream(
-                input,
-                completeResponse
-              );
-            chunkData.memoryUpdate = memoryUpdateResult;
-          } catch (memError) {
-            Logger.error("Error updating memory after stream:", memError);
+          if (chunk.type.includes("delta")) {
+            chunkData.content = "delta" in chunk ? chunk.delta : "";
+            if (chunkData.content) {
+              completeResponse += chunkData.content;
+            }
+          } else if (chunk.type.includes("done")) {
+            chunkData.done = true;
+
+            // After stream is done, update memory with the complete response
+            try {
+              const memoryUpdateResult =
+                await this.agentService.updateMemoryAfterStream(
+                  input,
+                  completeResponse,
+                  sessionId
+                );
+              chunkData.memoryUpdate = memoryUpdateResult;
+            } catch (memError) {
+              Logger.error("Error updating memory after stream:", memError);
+            }
+          } else if (chunk.type === "error") {
+            Logger.error("Error in stream:", chunk);
+            chunkData.error = "An error occurred in the stream";
           }
-        } else if (chunk.type === "error") {
-          Logger.error("Error in stream:", chunk);
-          chunkData.error = "An error occurred in the stream";
+        }
+        // Handle ChatCompletionChunk (from OpenAI Chat Completions API)
+        else if (chunk.choices && chunk.choices.length > 0) {
+          chunkData.type = "delta";
+          const content = chunk.choices[0]?.delta?.content || "";
+          chunkData.content = content;
+
+          if (content) {
+            completeResponse += content;
+          }
+
+          // Check if it's the last chunk
+          if (chunk.choices[0]?.finish_reason) {
+            chunkData.done = true;
+
+            // After stream is done, update memory with the complete response
+            try {
+              const memoryUpdateResult =
+                await this.agentService.updateMemoryAfterStream(
+                  input,
+                  completeResponse,
+                  sessionId
+                );
+              chunkData.memoryUpdate = memoryUpdateResult;
+            } catch (memError) {
+              Logger.error("Error updating memory after stream:", memError);
+            }
+          }
         }
 
         // Send the chunk as an SSE event
@@ -136,7 +175,7 @@ export class AgentController {
    */
   async functionCall(req: Request, res: Response): Promise<void> {
     try {
-      const { input, functions, instructions, model } = req.body;
+      const { input, functions, instructions, model, sessionId } = req.body;
 
       if (!input) {
         res.status(400).json({ error: "Input is required" });
@@ -152,7 +191,8 @@ export class AgentController {
       // This is handled internally in the AgentService
       const response = await this.agentService.processMemoryToolCall(
         input,
-        instructions
+        instructions,
+        sessionId
       );
 
       res.status(200).json(response);

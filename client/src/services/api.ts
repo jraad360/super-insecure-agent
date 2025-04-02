@@ -4,11 +4,12 @@ import axios from "axios";
 const API_URL = "http://localhost:3000/api/agent";
 
 export const agentService = {
-  async generateResponse(message: string): Promise<string> {
+  async generateResponse(message: string, sessionId: string): Promise<string> {
     try {
       const response = await axios.post(`${API_URL}/generate`, {
         input: message,
         model: "gpt-3.5-turbo",
+        sessionId: sessionId,
       });
       return response.data.output;
     } catch (error) {
@@ -19,6 +20,7 @@ export const agentService = {
 
   async streamResponse(
     message: string,
+    sessionId: string,
     onChunk: (chunk: string) => void
   ): Promise<void> {
     try {
@@ -27,6 +29,7 @@ export const agentService = {
         {
           input: message,
           model: "gpt-3.5-turbo",
+          sessionId: sessionId,
         },
         {
           responseType: "stream",

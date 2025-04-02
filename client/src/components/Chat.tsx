@@ -10,6 +10,7 @@ const Chat: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const sessionIdRef = useRef<string>(uuidv4());
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -18,6 +19,24 @@ const Chat: React.FC = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    // Generate a new session ID on component mount (page load/refresh)
+    sessionIdRef.current = uuidv4();
+    
+    // Clear messages when a new session starts
+    setMessages([]);
+    
+    // Add a welcome message
+    const welcomeMessage: MessageType = {
+      id: uuidv4(),
+      content: `Welcome to a new chat session (ID: ${sessionIdRef.current.slice(0, 8)}). Your conversation history is fresh, but I'll still remember important information from past sessions.`,
+      role: 'assistant',
+      timestamp: new Date(),
+    };
+    
+    setMessages([welcomeMessage]);
+  }, []);
 
   const handleSendMessage = async (content: string) => {
     if (!content.trim()) return;
@@ -34,7 +53,7 @@ const Chat: React.FC = () => {
     setError(null);
 
     try {
-      const response = await agentService.generateResponse(content);
+      const response = await agentService.generateResponse(content, sessionIdRef.current);
       
       const assistantMessage: MessageType = {
         id: uuidv4(),
@@ -65,8 +84,14 @@ const Chat: React.FC = () => {
         backgroundColor: '#0084ff',
         color: 'white',
         textAlign: 'center',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
       }}>
         <h1 style={{ margin: 0, fontSize: '20px' }}>Agent Chat</h1>
+        <small style={{ fontSize: '12px' }}>
+          Session ID: {sessionIdRef.current.slice(0, 8)}
+        </small>
       </header>
 
       <div style={{

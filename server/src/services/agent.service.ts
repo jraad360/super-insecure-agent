@@ -9,10 +9,15 @@ import { MemoryItem } from "../models/memory";
 export class AgentService {
   private openAIService: OpenAIService;
   private memoryService: MemoryService;
+  private sessionContexts: Map<
+    string,
+    Array<{ role: string; content: string }>
+  >;
 
   constructor() {
     this.openAIService = new OpenAIService();
     this.memoryService = new MemoryService();
+    this.sessionContexts = new Map();
   }
 
   /**
@@ -21,7 +26,8 @@ export class AgentService {
   async generateResponse(
     input: string,
     instructions: string = "You are a helpful assistant",
-    model: string = "gpt-4o"
+    model: string = "gpt-4o",
+    sessionId?: string
   ) {
     // Check if the input contains a direct memory storage command
     const memoryCommand = this.detectMemoryCommand(input);
@@ -38,14 +44,30 @@ export class AgentService {
       };
     }
 
+    // Get the conversation context for this session
+    let context: Array<{ role: string; content: string }> = [];
+    if (sessionId) {
+      context = this.sessionContexts.get(sessionId) || [];
+
+      // Add the new user message to context
+      context.push({ role: "user", content: input });
+    }
+
     const response = await this.openAIService.generateResponse(
       input,
       instructions,
-      model
+      model,
+      sessionId ? context : undefined
     );
 
     // After generating a response, consider updating memory
     await this.considerUpdatingMemory(input, response.output);
+
+    // Update the session context with the assistant's response
+    if (sessionId) {
+      context.push({ role: "assistant", content: response.output });
+      this.sessionContexts.set(sessionId, context);
+    }
 
     return response;
   }
@@ -56,7 +78,8 @@ export class AgentService {
   async streamResponse(
     input: string,
     instructions: string = "You are a helpful assistant",
-    model: string = "gpt-4o"
+    model: string = "gpt-4o",
+    sessionId?: string
   ) {
     // Check if the input contains a direct memory storage command
     const memoryCommand = this.detectMemoryCommand(input);
@@ -66,8 +89,23 @@ export class AgentService {
       // The memory command will already be processed
     }
 
+    // Get the conversation context for this session
+    let context: Array<{ role: string; content: string }> = [];
+    if (sessionId) {
+      context = this.sessionContexts.get(sessionId) || [];
+
+      // Add the new user message to context
+      context.push({ role: "user", content: input });
+      this.sessionContexts.set(sessionId, context);
+    }
+
     // Return the stream for the controller to handle
-    return await this.openAIService.streamResponse(input, instructions, model);
+    return await this.openAIService.streamResponse(
+      input,
+      instructions,
+      model,
+      sessionId ? context : undefined
+    );
 
     // Note: We can't update memory here since we're streaming
     // Memory updates for streaming should be handled afterward
@@ -76,7 +114,18 @@ export class AgentService {
   /**
    * Update memory after a streaming response is complete
    */
-  async updateMemoryAfterStream(input: string, output: string) {
+  async updateMemoryAfterStream(
+    input: string,
+    output: string,
+    sessionId?: string
+  ) {
+    // Update session context with assistant's response if sessionId is provided
+    if (sessionId) {
+      const context = this.sessionContexts.get(sessionId) || [];
+      context.push({ role: "assistant", content: output });
+      this.sessionContexts.set(sessionId, context);
+    }
+
     return await this.considerUpdatingMemory(input, output);
   }
 
@@ -335,269 +384,98 @@ Should I update my memory based on this interaction? If so, what memory items sh
   }
 
   /**
-   * Process memory tool calls
+   * Process memory tool calls with session context
    */
   async processMemoryToolCall(
     input: string,
-    instructions: string = "You are a helpful assistant with access to memory management tools"
+    instructions: string = "You are a helpful assistant with access to memory management tools",
+    sessionId?: string
   ) {
-    try {
-      // Check for direct memory commands first
-      const memoryCommand = this.detectMemoryCommand(input);
-      if (memoryCommand) {
-        const memoryItem = await this.processMemoryCommand(memoryCommand);
-        return {
-          tool: "create_memory",
-          arguments: {
-            description: memoryCommand.description,
-            content: memoryCommand.content,
-          },
-          result: memoryItem,
-          response: `I've saved that information for you. I'll remember that "${memoryCommand.content}".`,
-        };
-      }
+    // Get the conversation context for this session
+    let context: Array<{ role: string; content: string }> = [];
+    if (sessionId) {
+      context = this.sessionContexts.get(sessionId) || [];
 
-      const memoryTools = [
-        {
-          name: "create_memory",
-          description: "Create a new memory item",
-          parameters: {
-            type: "object",
-            properties: {
-              description: {
-                type: "string",
-                description: "Short description of what this memory represents",
-              },
-              content: {
-                type: "string",
-                description: "Content of the memory item",
-              },
-            },
-            required: ["description", "content"],
-          },
-        },
-        {
-          name: "get_memory",
-          description: "Get a memory item by ID",
-          parameters: {
-            type: "object",
-            properties: {
-              id: {
-                type: "string",
-                description: "ID of the memory item to retrieve",
-              },
-            },
-            required: ["id"],
-          },
-        },
-        {
-          name: "update_memory",
-          description: "Update an existing memory item",
-          parameters: {
-            type: "object",
-            properties: {
-              id: {
-                type: "string",
-                description: "ID of the memory item to update",
-              },
-              description: {
-                type: "string",
-                description: "New description (optional)",
-              },
-              content: {
-                type: "string",
-                description: "New content (optional)",
-              },
-            },
-            required: ["id"],
-          },
-        },
-        {
-          name: "delete_memory",
-          description: "Delete a memory item",
-          parameters: {
-            type: "object",
-            properties: {
-              id: {
-                type: "string",
-                description: "ID of the memory item to delete",
-              },
-            },
-            required: ["id"],
-          },
-        },
-        {
-          name: "search_memories",
-          description: "Search for memory items",
-          parameters: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "Search query",
-              },
-            },
-            required: ["query"],
-          },
-        },
-        {
-          name: "list_all_memories",
-          description: "List all memory items",
-          parameters: {
-            type: "object",
-            properties: {},
-            required: [],
-          },
-        },
-      ];
-
-      // Make the instructions more likely to use memory tools
-      const enhancedInstructions = `
-${instructions}
-
-You should be proactive about managing your memory. If the user asks you to remember something,
-use the create_memory tool. If they ask about something you might know, use search_memories
-to try to find relevant information.
-`;
-
-      const response = await this.openAIService.functionCall(
-        input,
-        memoryTools,
-        enhancedInstructions
-      );
-
-      const toolCalls = response.toolCalls;
-
-      if (!toolCalls || toolCalls.length === 0) {
-        return {
-          result: "No memory tool was called",
-          response: response.messageContent,
-        };
-      }
-
-      const functionCall = toolCalls[0];
-      const args = JSON.parse(functionCall.function.arguments);
-      let result;
-
-      switch (functionCall.function.name) {
-        case "create_memory":
-          result = await this.memoryService.storeMemory(
-            args.description,
-            args.content
-          );
-          break;
-
-        case "get_memory":
-          result = await this.memoryService.getMemory(args.id);
-          break;
-
-        case "update_memory":
-          result = await this.memoryService.updateMemory(args.id, {
-            description: args.description,
-            content: args.content,
-          });
-          break;
-
-        case "delete_memory":
-          result = await this.memoryService.deleteMemory(args.id);
-          break;
-
-        case "search_memories":
-          result = await this.memoryService.searchMemories(args.query);
-          break;
-
-        case "list_all_memories":
-          result = await this.memoryService.getAllMemories();
-          break;
-
-        default:
-          result = { error: "Unknown memory tool" };
-      }
-
-      return {
-        tool: functionCall.function.name,
-        arguments: args,
-        result,
-        response: response.messageContent,
-      };
-    } catch (error) {
-      Logger.error("Error processing memory tool call:", error);
-      throw error;
+      // Add the new user message to context
+      context.push({ role: "user", content: input });
     }
+
+    // Call the original method with appropriate context
+    const result = await this.openAIService.performMemoryFunctionCall(
+      input,
+      this.getMemoryToolDefinitions(),
+      async (name, args) => this.executeMemoryTool(name, args),
+      instructions,
+      sessionId ? context : undefined
+    );
+
+    // Update session context with assistant's response
+    if (sessionId) {
+      const context = this.sessionContexts.get(sessionId) || [];
+      context.push({ role: "assistant", content: result.output });
+      this.sessionContexts.set(sessionId, context);
+    }
+
+    return result;
   }
 
   /**
-   * Generate a response that incorporates relevant memories
+   * Generate response with memory and session context
    */
   async generateResponseWithMemory(
     input: string,
     instructions: string = "You are a helpful assistant",
-    model: string = "gpt-4o"
+    model: string = "gpt-4o",
+    sessionId?: string
   ) {
-    try {
-      // Check for direct memory commands first
-      const memoryCommand = this.detectMemoryCommand(input);
-      if (memoryCommand) {
-        const memoryItem = await this.processMemoryCommand(memoryCommand);
-        return {
-          output: `I've saved that information for you. ${
-            memoryCommand.type === "remember"
-              ? `I'll remember that "${memoryCommand.content}".`
-              : `I've made a note about "${memoryCommand.description}".`
-          }`,
-          requestId: "memory-command-" + Date.now(),
-          usedMemories: [],
-        };
-      }
+    // Get the conversation context for this session
+    let context: Array<{ role: string; content: string }> = [];
+    if (sessionId) {
+      context = this.sessionContexts.get(sessionId) || [];
 
-      // First, search for relevant memories
-      const keywords = this.extractKeywords(input);
-      const relevantMemories: MemoryItem[] = [];
-
-      for (const keyword of keywords) {
-        const memories = await this.memoryService.searchMemories(keyword);
-        for (const memory of memories) {
-          // Avoid duplicates
-          if (!relevantMemories.some((m) => m.id === memory.id)) {
-            relevantMemories.push(memory);
-          }
-        }
-      }
-
-      // Prepare memory context
-      let memoryContext = "";
-
-      if (relevantMemories.length > 0) {
-        memoryContext = "Here are some relevant things I remember:\n\n";
-
-        for (const memory of relevantMemories) {
-          memoryContext += `- ${memory.description}: ${memory.content}\n`;
-        }
-
-        memoryContext +=
-          "\nPlease use this information if relevant to the user's request.\n\n";
-      }
-
-      // Generate response with context
-      const enhancedInstructions = `${instructions}\n\n${memoryContext}`;
-
-      const response = await this.openAIService.generateResponse(
-        input,
-        enhancedInstructions,
-        model
-      );
-
-      // After generating a response, consider updating memory
-      await this.considerUpdatingMemory(input, response.output);
-
-      return {
-        ...response,
-        usedMemories: relevantMemories,
-      };
-    } catch (error) {
-      Logger.error("Error generating response with memory:", error);
-      throw error;
+      // Add the new user message to context
+      context.push({ role: "user", content: input });
     }
+
+    // Get relevant memories
+    const relevantMemories = await this.memoryService.getRelevantMemories(
+      input
+    );
+
+    // Build enhanced instructions with memory
+    let enhancedInstructions = instructions;
+    if (relevantMemories.length > 0) {
+      enhancedInstructions +=
+        "\n\nYou have access to the following memories to help you answer:";
+      relevantMemories.forEach((memory, index: number) => {
+        enhancedInstructions += `\n${index + 1}. ${memory.description}: ${
+          memory.content
+        }`;
+      });
+      enhancedInstructions +=
+        "\n\nUse these memories to provide more personalized and informed responses.";
+    }
+
+    const response = await this.openAIService.generateResponse(
+      input,
+      enhancedInstructions,
+      model,
+      sessionId ? context : undefined
+    );
+
+    // After generating a response, consider updating memory
+    await this.considerUpdatingMemory(input, response.output);
+
+    // Update session context with assistant's response
+    if (sessionId) {
+      context.push({ role: "assistant", content: response.output });
+      this.sessionContexts.set(sessionId, context);
+    }
+
+    return {
+      ...response,
+      memoriesUsed: relevantMemories.length > 0 ? relevantMemories : undefined,
+    };
   }
 
   /**
@@ -672,5 +550,143 @@ to try to find relevant information.
 
     // Return unique words
     return [...new Set(words)];
+  }
+
+  /**
+   * Get memory tool definitions
+   */
+  private getMemoryToolDefinitions() {
+    return [
+      {
+        name: "create_memory",
+        description: "Create a new memory item",
+        parameters: {
+          type: "object",
+          properties: {
+            description: {
+              type: "string",
+              description: "Short description of what this memory represents",
+            },
+            content: {
+              type: "string",
+              description: "Content of the memory item",
+            },
+          },
+          required: ["description", "content"],
+        },
+      },
+      {
+        name: "get_memory",
+        description: "Get a memory item by ID",
+        parameters: {
+          type: "object",
+          properties: {
+            id: {
+              type: "string",
+              description: "ID of the memory item to retrieve",
+            },
+          },
+          required: ["id"],
+        },
+      },
+      {
+        name: "update_memory",
+        description: "Update an existing memory item",
+        parameters: {
+          type: "object",
+          properties: {
+            id: {
+              type: "string",
+              description: "ID of the memory item to update",
+            },
+            description: {
+              type: "string",
+              description: "New description (optional)",
+            },
+            content: {
+              type: "string",
+              description: "New content (optional)",
+            },
+          },
+          required: ["id"],
+        },
+      },
+      {
+        name: "delete_memory",
+        description: "Delete a memory item",
+        parameters: {
+          type: "object",
+          properties: {
+            id: {
+              type: "string",
+              description: "ID of the memory item to delete",
+            },
+          },
+          required: ["id"],
+        },
+      },
+      {
+        name: "search_memories",
+        description: "Search for memory items",
+        parameters: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "Search query",
+            },
+          },
+          required: ["query"],
+        },
+      },
+      {
+        name: "list_all_memories",
+        description: "List all memory items",
+        parameters: {
+          type: "object",
+          properties: {},
+          required: [],
+        },
+      },
+    ];
+  }
+
+  /**
+   * Execute a memory tool
+   */
+  private async executeMemoryTool(name: string, args: any): Promise<any> {
+    try {
+      switch (name) {
+        case "create_memory":
+          return await this.memoryService.storeMemory(
+            args.description,
+            args.content
+          );
+
+        case "get_memory":
+          return await this.memoryService.getMemory(args.id);
+
+        case "update_memory":
+          return await this.memoryService.updateMemory(args.id, {
+            description: args.description,
+            content: args.content,
+          });
+
+        case "delete_memory":
+          return await this.memoryService.deleteMemory(args.id);
+
+        case "search_memories":
+          return await this.memoryService.searchMemories(args.query);
+
+        case "list_all_memories":
+          return await this.memoryService.getAllMemories();
+
+        default:
+          return { error: "Unknown memory tool" };
+      }
+    } catch (error) {
+      Logger.error("Error executing memory tool:", error);
+      throw error;
+    }
   }
 }
