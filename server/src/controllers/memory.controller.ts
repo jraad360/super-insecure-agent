@@ -112,8 +112,27 @@ export const MemoryController = {
     try {
       const { query } = req.query;
 
+      // Check if query exists and is a string
       if (!query || typeof query !== "string") {
         res.status(400).json({ error: "Search query is required" });
+        return;
+      }
+
+      // Validate query length to prevent excessive inputs
+      const MAX_QUERY_LENGTH = 500;
+      if (query.length > MAX_QUERY_LENGTH) {
+        res.status(400).json({ 
+          error: `Search query exceeds maximum length of ${MAX_QUERY_LENGTH} characters` 
+        });
+        return;
+      }
+
+      // Validate query format using a whitelist approach
+      const VALID_QUERY_REGEX = /^[a-zA-Z0-9\s.,?!;:'"()\-_]*$/;
+      if (!VALID_QUERY_REGEX.test(query)) {
+        res.status(400).json({ 
+          error: "Search query contains invalid characters" 
+        });
         return;
       }
 
