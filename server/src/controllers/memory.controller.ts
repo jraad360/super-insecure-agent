@@ -4,6 +4,10 @@ import { MemoryService } from "../services/memory.service";
 // Singleton memory service instance
 const memoryService = new MemoryService();
 
+// Constants for input validation
+const MAX_DESCRIPTION_LENGTH = 1000;
+const MAX_CONTENT_LENGTH = 10000;
+
 export const MemoryController = {
   /**
    * Create a new memory item
@@ -12,8 +16,26 @@ export const MemoryController = {
     try {
       const { description, content } = req.body;
 
+      // Check for presence
       if (!description || !content) {
         res.status(400).json({ error: "Description and content are required" });
+        return;
+      }
+
+      // Validate data types
+      if (typeof description !== 'string' || typeof content !== 'string') {
+        res.status(400).json({ error: "Description and content must be strings" });
+        return;
+      }
+
+      // Validate length
+      if (description.length > MAX_DESCRIPTION_LENGTH) {
+        res.status(400).json({ error: `Description cannot exceed ${MAX_DESCRIPTION_LENGTH} characters` });
+        return;
+      }
+      
+      if (content.length > MAX_CONTENT_LENGTH) {
+        res.status(400).json({ error: `Content cannot exceed ${MAX_CONTENT_LENGTH} characters` });
         return;
       }
 
@@ -68,6 +90,31 @@ export const MemoryController = {
           .status(400)
           .json({ error: "At least one field must be provided for update" });
         return;
+      }
+
+      // Validate types and length if provided
+      if (description !== undefined) {
+        if (typeof description !== 'string') {
+          res.status(400).json({ error: "Description must be a string" });
+          return;
+        }
+        
+        if (description.length > MAX_DESCRIPTION_LENGTH) {
+          res.status(400).json({ error: `Description cannot exceed ${MAX_DESCRIPTION_LENGTH} characters` });
+          return;
+        }
+      }
+      
+      if (content !== undefined) {
+        if (typeof content !== 'string') {
+          res.status(400).json({ error: "Content must be a string" });
+          return;
+        }
+        
+        if (content.length > MAX_CONTENT_LENGTH) {
+          res.status(400).json({ error: `Content cannot exceed ${MAX_CONTENT_LENGTH} characters` });
+          return;
+        }
       }
 
       const memory = await memoryService.updateMemory(id, {
