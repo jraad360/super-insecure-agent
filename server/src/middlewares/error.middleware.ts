@@ -49,6 +49,5 @@ export const errorHandler = (
   res.status(500).json({
     error: "An unexpected error occurred",
     status: "error",
-    message: err.message,
   });
 };
