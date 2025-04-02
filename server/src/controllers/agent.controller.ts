@@ -4,6 +4,7 @@ import { Logger } from "../utils/logger";
 
 export class AgentController {
   private agentService: AgentService;
+  private readonly MAX_INPUT_LENGTH = 100000; // Maximum allowed input length
 
   constructor() {
     this.agentService = new AgentService();
@@ -16,8 +17,42 @@ export class AgentController {
     try {
       const { input, instructions, model, useMemory } = req.body;
 
+      // Basic validation for required fields
       if (!input) {
         res.status(400).json({ error: "Input is required" });
+        return;
+      }
+      
+      // Type validation for input parameters
+      if (typeof input !== 'string') {
+        res.status(400).json({ error: "Input must be a string" });
+        return;
+      }
+      
+      // Type and existence validation for optional parameters
+      if (instructions !== undefined && typeof instructions !== 'string') {
+        res.status(400).json({ error: "Instructions must be a string when provided" });
+        return;
+      }
+      
+      if (model !== undefined && typeof model !== 'string') {
+        res.status(400).json({ error: "Model identifier must be a string when provided" });
+        return;
+      }
+      
+      if (useMemory !== undefined && typeof useMemory !== 'boolean') {
+        res.status(400).json({ error: "useMemory must be a boolean when provided" });
+        return;
+      }
+      
+      // Input length validation to prevent excessive resource consumption
+      if (input.length > this.MAX_INPUT_LENGTH) {
+        res.status(400).json({ error: `Input exceeds maximum allowed length of ${this.MAX_INPUT_LENGTH} characters` });
+        return;
+      }
+      
+      if (instructions && instructions.length > this.MAX_INPUT_LENGTH) {
+        res.status(400).json({ error: `Instructions exceed maximum allowed length of ${this.MAX_INPUT_LENGTH} characters` });
         return;
       }
 
@@ -47,8 +82,37 @@ export class AgentController {
     try {
       const { input, instructions, model } = req.body;
 
+      // Basic validation for required fields
       if (!input) {
         res.status(400).json({ error: "Input is required" });
+        return;
+      }
+      
+      // Type validation for input parameters
+      if (typeof input !== 'string') {
+        res.status(400).json({ error: "Input must be a string" });
+        return;
+      }
+      
+      // Type and existence validation for optional parameters
+      if (instructions !== undefined && typeof instructions !== 'string') {
+        res.status(400).json({ error: "Instructions must be a string when provided" });
+        return;
+      }
+      
+      if (model !== undefined && typeof model !== 'string') {
+        res.status(400).json({ error: "Model identifier must be a string when provided" });
+        return;
+      }
+      
+      // Input length validation to prevent excessive resource consumption
+      if (input.length > this.MAX_INPUT_LENGTH) {
+        res.status(400).json({ error: `Input exceeds maximum allowed length of ${this.MAX_INPUT_LENGTH} characters` });
+        return;
+      }
+      
+      if (instructions && instructions.length > this.MAX_INPUT_LENGTH) {
+        res.status(400).json({ error: `Instructions exceed maximum allowed length of ${this.MAX_INPUT_LENGTH} characters` });
         return;
       }
 
@@ -138,13 +202,42 @@ export class AgentController {
     try {
       const { input, functions, instructions, model } = req.body;
 
+      // Basic validation for required fields
       if (!input) {
         res.status(400).json({ error: "Input is required" });
+        return;
+      }
+      
+      // Type validation for input parameters
+      if (typeof input !== 'string') {
+        res.status(400).json({ error: "Input must be a string" });
         return;
       }
 
       if (!functions || !Array.isArray(functions) || functions.length === 0) {
         res.status(400).json({ error: "Valid functions array is required" });
+        return;
+      }
+      
+      // Type and existence validation for optional parameters
+      if (instructions !== undefined && typeof instructions !== 'string') {
+        res.status(400).json({ error: "Instructions must be a string when provided" });
+        return;
+      }
+      
+      if (model !== undefined && typeof model !== 'string') {
+        res.status(400).json({ error: "Model identifier must be a string when provided" });
+        return;
+      }
+      
+      // Input length validation to prevent excessive resource consumption
+      if (input.length > this.MAX_INPUT_LENGTH) {
+        res.status(400).json({ error: `Input exceeds maximum allowed length of ${this.MAX_INPUT_LENGTH} characters` });
+        return;
+      }
+      
+      if (instructions && instructions.length > this.MAX_INPUT_LENGTH) {
+        res.status(400).json({ error: `Instructions exceed maximum allowed length of ${this.MAX_INPUT_LENGTH} characters` });
         return;
       }
 
