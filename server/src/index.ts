@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import { env } from "./config/env";
 import { agentRouter } from "./routes/agent.routes";
+import { memoryRouter } from "./routes/memory.routes";
 import { errorHandler } from "./middlewares/error.middleware";
 import { Logger } from "./utils/logger";
 
@@ -13,6 +14,7 @@ app.use(express.json());
 
 // Routes
 app.use("/api/agent", agentRouter);
+app.use("/api/memory", memoryRouter);
 
 // Health check endpoint
 app.get("/health", (req: express.Request, res: express.Response) => {

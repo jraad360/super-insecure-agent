@@ -1,12 +1,12 @@
 import { Request, Response } from "express";
-import { OpenAIService } from "../services/openai.service";
+import { AgentService } from "../services/agent.service";
 import { Logger } from "../utils/logger";
 
 export class AgentController {
-  private openAIService: OpenAIService;
+  private agentService: AgentService;
 
   constructor() {
-    this.openAIService = new OpenAIService();
+    this.agentService = new AgentService();
   }
 
   /**
@@ -14,18 +14,21 @@ export class AgentController {
    */
   async getResponse(req: Request, res: Response): Promise<void> {
     try {
-      const { input, instructions, model } = req.body;
+      const { input, instructions, model, useMemory } = req.body;
 
       if (!input) {
         res.status(400).json({ error: "Input is required" });
         return;
       }
 
-      const response = await this.openAIService.generateResponse(
-        input,
-        instructions,
-        model
-      );
+      // Use memory-enhanced response if requested
+      const response = useMemory
+        ? await this.agentService.generateResponseWithMemory(
+            input,
+            instructions,
+            model
+          )
+        : await this.agentService.generateResponse(input, instructions, model);
 
       res.status(200).json(response);
     } catch (error) {
@@ -54,11 +57,13 @@ export class AgentController {
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
 
-      const stream = await this.openAIService.streamResponse(
+      const stream = await this.agentService.streamResponse(
         input,
         instructions,
         model
       );
+
+      let completeResponse = "";
 
       // Handle streaming response
       for await (const chunk of stream) {
@@ -71,8 +76,24 @@ export class AgentController {
         // Add relevant data based on chunk type
         if (chunk.type.includes("delta")) {
           chunkData.content = "delta" in chunk ? chunk.delta : "";
+          // Accumulate the response for memory updates later
+          if (chunkData.content) {
+            completeResponse += chunkData.content;
+          }
         } else if (chunk.type.includes("done")) {
           chunkData.done = true;
+
+          // After stream is done, update memory with the complete response
+          try {
+            const memoryUpdateResult =
+              await this.agentService.updateMemoryAfterStream(
+                input,
+                completeResponse
+              );
+            chunkData.memoryUpdate = memoryUpdateResult;
+          } catch (memError) {
+            Logger.error("Error updating memory after stream:", memError);
+          }
         } else if (chunk.type === "error") {
           Logger.error("Error in stream:", chunk);
           chunkData.error = "An error occurred in the stream";
@@ -127,11 +148,11 @@ export class AgentController {
         return;
       }
 
-      const response = await this.openAIService.functionCall(
+      // We'll continue to use the OpenAI service directly for generic function calls
+      // This is handled internally in the AgentService
+      const response = await this.agentService.processMemoryToolCall(
         input,
-        functions,
-        instructions,
-        model
+        instructions
       );
 
       res.status(200).json(response);
@@ -139,6 +160,45 @@ export class AgentController {
       Logger.error("Error in functionCall:", error);
       res.status(500).json({
         error: "An error occurred while processing the function call",
+        details: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Get all memory items
+   */
+  async getMemories(req: Request, res: Response): Promise<void> {
+    try {
+      const memories = await this.agentService.getAllMemories();
+      res.status(200).json(memories);
+    } catch (error) {
+      Logger.error("Error getting memories:", error);
+      res.status(500).json({
+        error: "An error occurred while retrieving memories",
+        details: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Search memory items
+   */
+  async searchMemories(req: Request, res: Response): Promise<void> {
+    try {
+      const { query } = req.query;
+
+      if (!query || typeof query !== "string") {
+        res.status(400).json({ error: "Search query is required" });
+        return;
+      }
+
+      const memories = await this.agentService.searchMemories(query);
+      res.status(200).json(memories);
+    } catch (error) {
+      Logger.error("Error searching memories:", error);
+      res.status(500).json({
+        error: "An error occurred while searching memories",
         details: error instanceof Error ? error.message : String(error),
       });
     }
