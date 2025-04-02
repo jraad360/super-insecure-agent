@@ -100,7 +100,7 @@ export class AgentService {
     if (rememberMatch && rememberMatch[1]) {
       return {
         type: "remember",
-        content: rememberMatch[1].trim(),
+        content: this.sanitizeContent(rememberMatch[1]),
       };
     }
 
@@ -111,7 +111,7 @@ export class AgentService {
     if (pleaseRememberMatch && pleaseRememberMatch[2]) {
       return {
         type: "remember",
-        content: pleaseRememberMatch[2].trim(),
+        content: this.sanitizeContent(pleaseRememberMatch[2]),
       };
     }
 
@@ -126,18 +126,45 @@ export class AgentService {
       if (aboutMatch) {
         return {
           type: "note",
-          description: aboutMatch[1].trim(),
-          content: aboutMatch[2].trim(),
+          description: this.sanitizeContent(aboutMatch[1]),
+          content: this.sanitizeContent(aboutMatch[2]),
         };
       }
 
       return {
         type: "note",
-        content: noteMatch[1].trim(),
+        content: this.sanitizeContent(noteMatch[1]),
       };
     }
 
     return null;
+  }
+
+  /**
+   * Sanitize content extracted from user input
+   * Removes potentially harmful characters and ensures content is safe for storage
+   */
+  private sanitizeContent(content: string): string {
+    if (!content) return "";
+    
+    // Trim whitespace
+    let sanitized = content.trim();
+    
+    // Limit the length to prevent abuse
+    const MAX_CONTENT_LENGTH = 500;
+    if (sanitized.length > MAX_CONTENT_LENGTH) {
+      sanitized = sanitized.substring(0, MAX_CONTENT_LENGTH);
+    }
+    
+    // Escape HTML entities to prevent XSS
+    sanitized = sanitized
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+    
+    return sanitized;
   }
 
   /**
