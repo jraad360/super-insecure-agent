@@ -23,6 +23,14 @@ export class AgentService {
     instructions: string = "You are a helpful assistant",
     model: string = "gpt-4o"
   ) {
+    // Validate input before processing
+    if (!this.isValidInput(input)) {
+      return {
+        output: "I cannot process this input due to safety constraints.",
+        requestId: "invalid-input-" + Date.now(),
+      };
+    }
+    
     // Check if the input contains a direct memory storage command
     const memoryCommand = this.detectMemoryCommand(input);
     if (memoryCommand) {
@@ -58,6 +66,11 @@ export class AgentService {
     instructions: string = "You are a helpful assistant",
     model: string = "gpt-4o"
   ) {
+    // Validate input before processing
+    if (!this.isValidInput(input)) {
+      throw new Error("Invalid input detected. Unable to process the request.");
+    }
+    
     // Check if the input contains a direct memory storage command
     const memoryCommand = this.detectMemoryCommand(input);
     if (memoryCommand) {
@@ -77,7 +90,54 @@ export class AgentService {
    * Update memory after a streaming response is complete
    */
   async updateMemoryAfterStream(input: string, output: string) {
+    // Validate input before processing
+    if (!this.isValidInput(input)) {
+      return { updated: false, error: "Invalid input" };
+    }
+    
     return await this.considerUpdatingMemory(input, output);
+  }
+
+  /**
+   * Validate if input is safe to process
+   */
+  private isValidInput(input: string): boolean {
+    return Boolean(input) && 
+           typeof input === 'string' && 
+           input.length > 0 && 
+           input.length <= 5000; // Reasonable length limit
+  }
+
+  /**
+   * Sanitize input to remove potentially harmful content
+   */
+  private sanitizeInput(input: string): string {
+    if (!input) return '';
+    
+    // Remove potentially dangerous characters
+    const sanitized = input
+      .replace(/[<>]/g, '') // Remove angle brackets which could be used for HTML/script injection
+      .trim();
+    
+    // Limit length to prevent abuse
+    return sanitized.length > 1000 ? sanitized.substring(0, 1000) : sanitized;
+  }
+
+  /**
+   * Validate memory content to ensure it's safe for storage
+   */
+  private validateMemoryContent(content: string): { valid: boolean; sanitized: string } {
+    // First sanitize the content
+    const sanitized = this.sanitizeInput(content);
+    
+    // Check if the content is empty after sanitization
+    if (!sanitized || sanitized.length < 2) {
+      return { valid: false, sanitized };
+    }
+    
+    // Additional validation rules could be added here
+    
+    return { valid: true, sanitized };
   }
 
   /**
@@ -92,16 +152,25 @@ export class AgentService {
     description?: string;
     content: string;
   } | null {
+    // If input is not valid, return null immediately
+    if (!this.isValidInput(input)) {
+      return null;
+    }
+    
     const lowerInput = input.toLowerCase();
 
     // Direct "remember that X" pattern
     const rememberPattern = /remember that (.*)/i;
     const rememberMatch = input.match(rememberPattern);
     if (rememberMatch && rememberMatch[1]) {
-      return {
-        type: "remember",
-        content: rememberMatch[1].trim(),
-      };
+      const validation = this.validateMemoryContent(rememberMatch[1]);
+      if (validation.valid) {
+        return {
+          type: "remember",
+          content: validation.sanitized,
+        };
+      }
+      return null;
     }
 
     // "Please remember X" pattern
@@ -109,31 +178,47 @@ export class AgentService {
       /(?:please\s+)?remember\s+(my|that my|that) ([^\.]+)/i;
     const pleaseRememberMatch = input.match(pleaseRememberPattern);
     if (pleaseRememberMatch && pleaseRememberMatch[2]) {
-      return {
-        type: "remember",
-        content: pleaseRememberMatch[2].trim(),
-      };
+      const validation = this.validateMemoryContent(pleaseRememberMatch[2]);
+      if (validation.valid) {
+        return {
+          type: "remember",
+          content: validation.sanitized,
+        };
+      }
+      return null;
     }
 
     // "Make a note that X" pattern
     const notePattern = /make a note (?:that|about) (.*)/i;
     const noteMatch = input.match(notePattern);
     if (noteMatch && noteMatch[1]) {
+      // Validate the matched content
+      const validation = this.validateMemoryContent(noteMatch[1]);
+      if (!validation.valid) {
+        return null;
+      }
+      
       // Try to extract a description if present
       const aboutPattern = /(.*?) is (.*)/i;
-      const aboutMatch = noteMatch[1].match(aboutPattern);
+      const aboutMatch = validation.sanitized.match(aboutPattern);
 
       if (aboutMatch) {
-        return {
-          type: "note",
-          description: aboutMatch[1].trim(),
-          content: aboutMatch[2].trim(),
-        };
+        const descValidation = this.validateMemoryContent(aboutMatch[1]);
+        const contentValidation = this.validateMemoryContent(aboutMatch[2]);
+        
+        if (descValidation.valid && contentValidation.valid) {
+          return {
+            type: "note",
+            description: descValidation.sanitized,
+            content: contentValidation.sanitized,
+          };
+        }
+        return null;
       }
 
       return {
         type: "note",
-        content: noteMatch[1].trim(),
+        content: validation.sanitized,
       };
     }
 
@@ -148,6 +233,15 @@ export class AgentService {
     description?: string;
     content: string;
   }): Promise<MemoryItem> {
+    // Validate again to ensure content is safe
+    const contentValidation = this.validateMemoryContent(command.content);
+    if (!contentValidation.valid) {
+      throw new Error("Invalid memory content");
+    }
+    
+    // Update with sanitized content
+    command.content = contentValidation.sanitized;
+    
     // For 'remember' type, generate a description
     if (command.type === "remember" && !command.description) {
       const keyTerms = this.extractKeywords(command.content);
@@ -158,6 +252,16 @@ export class AgentService {
     // For 'note' without description
     if (command.type === "note" && !command.description) {
       command.description = "User note";
+    }
+    
+    // If there's a description, sanitize it too
+    if (command.description) {
+      const descValidation = this.validateMemoryContent(command.description);
+      if (!descValidation.valid) {
+        command.description = "User information";
+      } else {
+        command.description = descValidation.sanitized;
+      }
     }
 
     // Store in memory
@@ -172,6 +276,14 @@ export class AgentService {
    */
   async considerUpdatingMemory(userInput: string, agentOutput: string) {
     try {
+      // Validate inputs
+      if (!this.isValidInput(userInput) || !this.isValidInput(agentOutput)) {
+        return { 
+          updated: false, 
+          error: "Invalid input or output for memory update" 
+        };
+      }
+      
       // Check for direct memory commands first
       const memoryCommand = this.detectMemoryCommand(userInput);
       if (memoryCommand) {
@@ -287,6 +399,22 @@ Should I update my memory based on this interaction? If so, what memory items sh
 
         if (args.memory_items && Array.isArray(args.memory_items)) {
           for (const item of args.memory_items) {
+            // Validate memory item content before storing
+            if (!item.description || !item.content) {
+              continue; // Skip invalid items
+            }
+            
+            const descValidation = this.validateMemoryContent(item.description);
+            const contentValidation = this.validateMemoryContent(item.content);
+            
+            if (!descValidation.valid || !contentValidation.valid) {
+              continue; // Skip invalid items
+            }
+            
+            // Use sanitized values
+            item.description = descValidation.sanitized;
+            item.content = contentValidation.sanitized;
+            
             if (item.action === "create") {
               const newItem = await this.memoryService.storeMemory(
                 item.description,
@@ -331,7 +459,17 @@ Should I update my memory based on this interaction? If so, what memory items sh
    * Search memory items
    */
   async searchMemories(query: string): Promise<MemoryItem[]> {
-    return await this.memoryService.searchMemories(query);
+    // Validate and sanitize the search query
+    if (!this.isValidInput(query)) {
+      return [];
+    }
+    
+    const { valid, sanitized } = this.validateMemoryContent(query);
+    if (!valid) {
+      return [];
+    }
+    
+    return await this.memoryService.searchMemories(sanitized);
   }
 
   /**
@@ -342,6 +480,14 @@ Should I update my memory based on this interaction? If so, what memory items sh
     instructions: string = "You are a helpful assistant with access to memory management tools"
   ) {
     try {
+      // Validate input
+      if (!this.isValidInput(input)) {
+        return {
+          result: "Invalid input detected",
+          response: "I cannot process this request due to safety constraints.",
+        };
+      }
+      
       // Check for direct memory commands first
       const memoryCommand = this.detectMemoryCommand(input);
       if (memoryCommand) {
@@ -479,31 +625,83 @@ to try to find relevant information.
       const args = JSON.parse(functionCall.function.arguments);
       let result;
 
+      // Validate and sanitize inputs based on the tool being called
       switch (functionCall.function.name) {
         case "create_memory":
+          // Validate description and content
+          if (!args.description || !args.content) {
+            return { 
+              result: { error: "Missing required fields" },
+              response: "I couldn't save this to memory because some required information was missing."
+            };
+          }
+          
+          const descValidation = this.validateMemoryContent(args.description);
+          const contentValidation = this.validateMemoryContent(args.content);
+          
+          if (!descValidation.valid || !contentValidation.valid) {
+            return { 
+              result: { error: "Invalid memory content" },
+              response: "I couldn't save this to memory because the content didn't pass safety checks."
+            };
+          }
+          
           result = await this.memoryService.storeMemory(
-            args.description,
-            args.content
+            descValidation.sanitized,
+            contentValidation.sanitized
           );
           break;
 
         case "get_memory":
+          // ID validation should be handled by the memory service
           result = await this.memoryService.getMemory(args.id);
           break;
 
         case "update_memory":
-          result = await this.memoryService.updateMemory(args.id, {
-            description: args.description,
-            content: args.content,
-          });
+          // ID validation should be handled by the memory service
+          // For description and content, validate if present
+          let validatedUpdate: any = { id: args.id };
+          
+          if (args.description) {
+            const descValidation = this.validateMemoryContent(args.description);
+            if (descValidation.valid) {
+              validatedUpdate.description = descValidation.sanitized;
+            }
+          }
+          
+          if (args.content) {
+            const contentValidation = this.validateMemoryContent(args.content);
+            if (contentValidation.valid) {
+              validatedUpdate.content = contentValidation.sanitized;
+            }
+          }
+          
+          result = await this.memoryService.updateMemory(args.id, validatedUpdate);
           break;
 
         case "delete_memory":
+          // ID validation should be handled by the memory service
           result = await this.memoryService.deleteMemory(args.id);
           break;
 
         case "search_memories":
-          result = await this.memoryService.searchMemories(args.query);
+          // Validate and sanitize the search query
+          if (!args.query) {
+            return { 
+              result: { error: "Missing search query" },
+              response: "I need a search term to look through my memories."
+            };
+          }
+          
+          const queryValidation = this.validateMemoryContent(args.query);
+          if (!queryValidation.valid) {
+            return { 
+              result: { error: "Invalid search query" },
+              response: "I couldn't search memories because the query didn't pass safety checks."
+            };
+          }
+          
+          result = await this.memoryService.searchMemories(queryValidation.sanitized);
           break;
 
         case "list_all_memories":
@@ -535,6 +733,15 @@ to try to find relevant information.
     model: string = "gpt-4o"
   ) {
     try {
+      // Validate input
+      if (!this.isValidInput(input)) {
+        return {
+          output: "I cannot process this input due to safety constraints.",
+          requestId: "invalid-input-" + Date.now(),
+          usedMemories: [],
+        };
+      }
+      
       // Check for direct memory commands first
       const memoryCommand = this.detectMemoryCommand(input);
       if (memoryCommand) {
@@ -604,6 +811,11 @@ to try to find relevant information.
    * Extract potential search keywords from user input
    */
   private extractKeywords(input: string): string[] {
+    // Validate input
+    if (!this.isValidInput(input)) {
+      return [];
+    }
+    
     // A simple keyword extraction implementation
     // Remove common words, punctuation, and split into words
     const stopWords = new Set([
