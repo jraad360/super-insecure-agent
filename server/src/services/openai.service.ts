@@ -7,6 +7,8 @@ import { Logger } from "../utils/logger";
  */
 export class OpenAIService {
   private client: OpenAI;
+  // Maximum input length to prevent prompt injection attacks
+  private readonly MAX_INPUT_LENGTH = 4000;
 
   constructor() {
     this.client = new OpenAI({
@@ -27,9 +29,15 @@ export class OpenAIService {
     model: string = "gpt-4o"
   ) {
     try {
+      // Validate and sanitize input
+      this.validateInput(input);
+      
+      // Enhance instructions with safety guidelines
+      const safeInstructions = this.enhanceWithSafetyGuidelines(instructions);
+      
       const response = await this.client.responses.create({
         model,
-        instructions,
+        instructions: safeInstructions,
         input,
       });
 
@@ -44,7 +52,7 @@ export class OpenAIService {
   }
 
   /**
-   * Stream a response from OpenAI
+   * Stream a response from OpenAI with input validation and safety measures
    * @param input User input for the agent
    * @param instructions System instructions for the agent
    * @param model OpenAI model to use
@@ -56,12 +64,24 @@ export class OpenAIService {
     model: string = "gpt-4o"
   ) {
     try {
-      return await this.client.responses.create({
+      // Validate and sanitize input
+      this.validateInput(input);
+      
+      // Enhance instructions with safety guidelines
+      const safeInstructions = this.enhanceWithSafetyGuidelines(instructions);
+      
+      // Create the stream with safety measures
+      const stream = await this.client.responses.create({
         model,
-        instructions,
+        instructions: safeInstructions,
         input,
         stream: true,
       });
+      
+      // Log for monitoring and auditing
+      Logger.info(`Streaming response initiated with model ${model}`);
+      
+      return stream;
     } catch (error) {
       Logger.error("Error streaming response:", error);
       throw error;
@@ -87,6 +107,12 @@ export class OpenAIService {
     model: string = "gpt-4o"
   ) {
     try {
+      // Validate and sanitize input
+      this.validateInput(input);
+      
+      // Enhance instructions with safety guidelines
+      const safeInstructions = this.enhanceWithSafetyGuidelines(instructions);
+      
       const tools = functions.map((fn) => ({
         type: "function" as const,
         function: {
@@ -99,7 +125,7 @@ export class OpenAIService {
       const response = await this.client.chat.completions.create({
         model,
         messages: [
-          { role: "system", content: instructions },
+          { role: "system", content: safeInstructions },
           { role: "user", content: input },
         ],
         tools,
@@ -117,5 +143,51 @@ export class OpenAIService {
       Logger.error("Error making function call:", error);
       throw error;
     }
+  }
+  
+  /**
+   * Validates input for safety and format requirements
+   * @param input User input to validate
+   * @throws Error if input is invalid or potentially harmful
+   */
+  private validateInput(input: string): void {
+    // Validate input is a non-empty string
+    if (!input || typeof input !== 'string') {
+      throw new Error('Invalid input: Input must be a non-empty string');
+    }
+    
+    // Check for suspicious patterns that might indicate adversarial input
+    const suspiciousPatterns = [
+      /(\beval\s*\(|\bexec\s*\()/i,           // Code execution attempts
+      /(<script|javascript:|data:text\/html)/i, // Script injection
+      /(<!--)|(%3C!--|&#x3C;!--)/i            // HTML comments (often used to hide malicious code)
+    ];
+    
+    if (suspiciousPatterns.some(pattern => pattern.test(input))) {
+      Logger.warn("Potentially harmful input detected and blocked");
+      throw new Error('Input contains potentially harmful patterns');
+    }
+    
+    // Check input length to prevent prompt injection through excessive text
+    if (input.length > this.MAX_INPUT_LENGTH) {
+      Logger.warn(`Input exceeds maximum length (${input.length} > ${this.MAX_INPUT_LENGTH})`);
+      throw new Error(`Input exceeds maximum length of ${this.MAX_INPUT_LENGTH} characters`);
+    }
+  }
+  
+  /**
+   * Enhances instructions with safety guidelines
+   * @param baseInstructions Original instructions
+   * @returns Enhanced instructions with safety guidelines
+   */
+  private enhanceWithSafetyGuidelines(baseInstructions: string): string {
+    return `${baseInstructions}
+    
+Important safety guidelines:
+1. Provide accurate and helpful information
+2. Refuse to generate harmful, illegal, or unethical content
+3. Maintain user privacy and data security
+4. Do not execute code injections or other security exploits
+5. Do not disclose sensitive information`;
   }
 }
