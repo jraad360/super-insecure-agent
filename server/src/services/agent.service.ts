@@ -98,9 +98,16 @@ export class AgentService {
     const rememberPattern = /remember that (.*)/i;
     const rememberMatch = input.match(rememberPattern);
     if (rememberMatch && rememberMatch[1]) {
+      const content = rememberMatch[1].trim();
+      
+      // Basic validation
+      if (!this.isValidMemoryContent(content)) {
+        return null;
+      }
+      
       return {
         type: "remember",
-        content: rememberMatch[1].trim(),
+        content: this.sanitizeContent(content),
       };
     }
 
@@ -109,9 +116,16 @@ export class AgentService {
       /(?:please\s+)?remember\s+(my|that my|that) ([^\.]+)/i;
     const pleaseRememberMatch = input.match(pleaseRememberPattern);
     if (pleaseRememberMatch && pleaseRememberMatch[2]) {
+      const content = pleaseRememberMatch[2].trim();
+      
+      // Basic validation
+      if (!this.isValidMemoryContent(content)) {
+        return null;
+      }
+      
       return {
         type: "remember",
-        content: pleaseRememberMatch[2].trim(),
+        content: this.sanitizeContent(content),
       };
     }
 
@@ -119,25 +133,92 @@ export class AgentService {
     const notePattern = /make a note (?:that|about) (.*)/i;
     const noteMatch = input.match(notePattern);
     if (noteMatch && noteMatch[1]) {
+      const noteContent = noteMatch[1].trim();
+      
+      // Basic validation
+      if (!this.isValidMemoryContent(noteContent)) {
+        return null;
+      }
+      
       // Try to extract a description if present
       const aboutPattern = /(.*?) is (.*)/i;
-      const aboutMatch = noteMatch[1].match(aboutPattern);
+      const aboutMatch = noteContent.match(aboutPattern);
 
       if (aboutMatch) {
+        const description = aboutMatch[1].trim();
+        const content = aboutMatch[2].trim();
+        
+        // Basic validation
+        if (!this.isValidMemoryContent(description) || !this.isValidMemoryContent(content)) {
+          return null;
+        }
+        
         return {
           type: "note",
-          description: aboutMatch[1].trim(),
-          content: aboutMatch[2].trim(),
+          description: this.sanitizeContent(description),
+          content: this.sanitizeContent(content),
         };
       }
 
       return {
         type: "note",
-        content: noteMatch[1].trim(),
+        content: this.sanitizeContent(noteContent),
       };
     }
 
     return null;
+  }
+
+  /**
+   * Validate memory content
+   * Checks if content meets basic requirements for safe storage
+   */
+  private isValidMemoryContent(content: string): boolean {
+    // Check if content is not empty and not too long
+    if (content.length < 1 || content.length > 1000) {
+      return false;
+    }
+    
+    // Check for potentially malicious patterns
+    const suspiciousPatterns = [
+      /<script/i,
+      /javascript:/i,
+      /onerror=/i,
+      /onload=/i,
+      /onclick=/i,
+      /data:text\/html/i
+    ];
+    
+    for (const pattern of suspiciousPatterns) {
+      if (pattern.test(content)) {
+        return false;
+      }
+    }
+    
+    return true;
+  }
+
+  /**
+   * Sanitize content for memory storage
+   * Removes or escapes potentially dangerous characters
+   */
+  private sanitizeContent(content: string): string {
+    // Remove any HTML/script tags
+    let sanitized = content.replace(/<(\/?)(\w+)((\s+\w+(\s*=\s*(?:".*?"|'.*?'|[^'">\s]+))?)+\s*|\s*)\/?>/gi, '');
+    
+    // Escape special characters
+    sanitized = sanitized.replace(/[&<>"']/g, function(match) {
+      switch (match) {
+        case '&': return '&amp;';
+        case '<': return '&lt;';
+        case '>': return '&gt;';
+        case '"': return '&quot;';
+        case "'": return '&#39;';
+        default: return match;
+      }
+    });
+    
+    return sanitized;
   }
 
   /**
@@ -152,7 +233,7 @@ export class AgentService {
     if (command.type === "remember" && !command.description) {
       const keyTerms = this.extractKeywords(command.content);
       const topic = keyTerms.length > 0 ? keyTerms[0] : "user information";
-      command.description = `User information about ${topic}`;
+      command.description = `User information about ${this.sanitizeContent(topic)}`;
     }
 
     // For 'note' without description
@@ -160,7 +241,7 @@ export class AgentService {
       command.description = "User note";
     }
 
-    // Store in memory
+    // Store in memory - content is already sanitized
     return await this.memoryService.storeMemory(
       command.description as string,
       command.content
@@ -287,18 +368,27 @@ Should I update my memory based on this interaction? If so, what memory items sh
 
         if (args.memory_items && Array.isArray(args.memory_items)) {
           for (const item of args.memory_items) {
+            // Sanitize and validate memory items from function calls
+            if (!this.isValidMemoryContent(item.description) || 
+                !this.isValidMemoryContent(item.content)) {
+              continue; // Skip invalid items
+            }
+            
+            const sanitizedDesc = this.sanitizeContent(item.description);
+            const sanitizedContent = this.sanitizeContent(item.content);
+            
             if (item.action === "create") {
               const newItem = await this.memoryService.storeMemory(
-                item.description,
-                item.content
+                sanitizedDesc,
+                sanitizedContent
               );
               memoryUpdates.push({ action: "created", item: newItem });
             } else if (item.action === "update" && item.id) {
               const updatedItem = await this.memoryService.updateMemory(
                 item.id,
                 {
-                  description: item.description,
-                  content: item.content,
+                  description: sanitizedDesc,
+                  content: sanitizedContent,
                 }
               );
               memoryUpdates.push({ action: "updated", item: updatedItem });
@@ -479,12 +569,18 @@ to try to find relevant information.
       const args = JSON.parse(functionCall.function.arguments);
       let result;
 
+      // Validate and sanitize all inputs from tool calls
       switch (functionCall.function.name) {
         case "create_memory":
-          result = await this.memoryService.storeMemory(
-            args.description,
-            args.content
-          );
+          if (this.isValidMemoryContent(args.description) && 
+              this.isValidMemoryContent(args.content)) {
+            result = await this.memoryService.storeMemory(
+              this.sanitizeContent(args.description),
+              this.sanitizeContent(args.content)
+            );
+          } else {
+            result = { error: "Invalid memory content" };
+          }
           break;
 
         case "get_memory":
@@ -492,10 +588,28 @@ to try to find relevant information.
           break;
 
         case "update_memory":
-          result = await this.memoryService.updateMemory(args.id, {
-            description: args.description,
-            content: args.content,
-          });
+          // Sanitize and validate description and content if provided
+          const updates: {description?: string, content?: string} = {};
+          
+          if (args.description) {
+            if (this.isValidMemoryContent(args.description)) {
+              updates.description = this.sanitizeContent(args.description);
+            } else {
+              result = { error: "Invalid description content" };
+              break;
+            }
+          }
+          
+          if (args.content) {
+            if (this.isValidMemoryContent(args.content)) {
+              updates.content = this.sanitizeContent(args.content);
+            } else {
+              result = { error: "Invalid memory content" };
+              break;
+            }
+          }
+          
+          result = await this.memoryService.updateMemory(args.id, updates);
           break;
 
         case "delete_memory":
@@ -503,7 +617,13 @@ to try to find relevant information.
           break;
 
         case "search_memories":
-          result = await this.memoryService.searchMemories(args.query);
+          if (this.isValidMemoryContent(args.query)) {
+            result = await this.memoryService.searchMemories(
+              this.sanitizeContent(args.query)
+            );
+          } else {
+            result = { error: "Invalid search query" };
+          }
           break;
 
         case "list_all_memories":
