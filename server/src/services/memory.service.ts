@@ -50,9 +50,34 @@ export class MemoryService {
   }
 
   /**
+   * Validate and sanitize the search query to prevent ML input bias
+   * @private
+   */
+  private validateQuery(query: string): string {
+    if (query === null || query === undefined) {
+      throw new Error("Search query cannot be null or undefined");
+    }
+
+    // Convert to string if not already
+    let validatedQuery = String(query).trim();
+    
+    // Limit query length to prevent DoS attacks
+    const MAX_QUERY_LENGTH = 500;
+    if (validatedQuery.length > MAX_QUERY_LENGTH) {
+      validatedQuery = validatedQuery.substring(0, MAX_QUERY_LENGTH);
+    }
+
+    // Normalize whitespace
+    validatedQuery = validatedQuery.replace(/\s+/g, ' ');
+
+    return validatedQuery;
+  }
+
+  /**
    * Search for memories
    */
   async searchMemories(query: string): Promise<MemoryItem[]> {
-    return this.db.search(query);
+    const validatedQuery = this.validateQuery(query);
+    return this.db.search(validatedQuery);
   }
 }
