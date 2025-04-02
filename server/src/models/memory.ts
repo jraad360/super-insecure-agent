@@ -2,6 +2,9 @@
  * Memory database for agent's knowledge storage
  */
 
+// Import the crypto module for secure random number generation
+import * as crypto from 'crypto';
+
 // Memory item interface
 export interface MemoryItem {
   id: string;
@@ -119,12 +122,10 @@ export class InMemoryDatabase implements MemoryDatabase {
   }
 
   /**
-   * Generates a unique identifier
+   * Generates a unique identifier using cryptographically secure random numbers
    */
   private generateId(): string {
-    return (
-      Math.random().toString(36).substring(2, 15) +
-      Math.random().toString(36).substring(2, 15)
-    );
+    // Generate 16 random bytes and convert to hex string, which gives us 32 characters
+    return crypto.randomBytes(16).toString('hex');
   }
 }
