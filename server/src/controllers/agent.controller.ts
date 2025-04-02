@@ -16,8 +16,27 @@ export class AgentController {
     try {
       const { input, instructions, model, useMemory } = req.body;
 
-      if (!input) {
-        res.status(400).json({ error: "Input is required" });
+      // Validate input
+      if (!input || typeof input !== "string" || input.trim() === "") {
+        res.status(400).json({ error: "Valid input string is required" });
+        return;
+      }
+
+      // Validate instructions if provided
+      if (instructions !== undefined && typeof instructions !== "string") {
+        res.status(400).json({ error: "Instructions must be a string if provided" });
+        return;
+      }
+
+      // Validate model if provided
+      if (model !== undefined && typeof model !== "string") {
+        res.status(400).json({ error: "Model must be a string if provided" });
+        return;
+      }
+
+      // Validate useMemory if provided
+      if (useMemory !== undefined && typeof useMemory !== "boolean") {
+        res.status(400).json({ error: "useMemory must be a boolean if provided" });
         return;
       }
 
@@ -25,10 +44,14 @@ export class AgentController {
       const response = useMemory
         ? await this.agentService.generateResponseWithMemory(
             input,
-            instructions,
-            model
+            instructions || "",
+            model || ""
           )
-        : await this.agentService.generateResponse(input, instructions, model);
+        : await this.agentService.generateResponse(
+            input,
+            instructions || "",
+            model || ""
+          );
 
       res.status(200).json(response);
     } catch (error) {
@@ -47,8 +70,21 @@ export class AgentController {
     try {
       const { input, instructions, model } = req.body;
 
-      if (!input) {
-        res.status(400).json({ error: "Input is required" });
+      // Validate input
+      if (!input || typeof input !== "string" || input.trim() === "") {
+        res.status(400).json({ error: "Valid input string is required" });
+        return;
+      }
+
+      // Validate instructions if provided
+      if (instructions !== undefined && typeof instructions !== "string") {
+        res.status(400).json({ error: "Instructions must be a string if provided" });
+        return;
+      }
+
+      // Validate model if provided
+      if (model !== undefined && typeof model !== "string") {
+        res.status(400).json({ error: "Model must be a string if provided" });
         return;
       }
 
@@ -59,8 +95,8 @@ export class AgentController {
 
       const stream = await this.agentService.streamResponse(
         input,
-        instructions,
-        model
+        instructions || "",
+        model || ""
       );
 
       let completeResponse = "";
@@ -138,8 +174,9 @@ export class AgentController {
     try {
       const { input, functions, instructions, model } = req.body;
 
-      if (!input) {
-        res.status(400).json({ error: "Input is required" });
+      // Validate input
+      if (!input || typeof input !== "string" || input.trim() === "") {
+        res.status(400).json({ error: "Valid input string is required" });
         return;
       }
 
@@ -148,11 +185,23 @@ export class AgentController {
         return;
       }
 
+      // Validate instructions if provided
+      if (instructions !== undefined && typeof instructions !== "string") {
+        res.status(400).json({ error: "Instructions must be a string if provided" });
+        return;
+      }
+
+      // Validate model if provided
+      if (model !== undefined && typeof model !== "string") {
+        res.status(400).json({ error: "Model must be a string if provided" });
+        return;
+      }
+
       // We'll continue to use the OpenAI service directly for generic function calls
       // This is handled internally in the AgentService
       const response = await this.agentService.processMemoryToolCall(
         input,
-        instructions
+        instructions || ""
       );
 
       res.status(200).json(response);
