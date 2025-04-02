@@ -5,6 +5,54 @@ import ChatBox from './ChatBox';
 import { Message as MessageType } from '../types/chat';
 import { agentService } from '../services/api';
 
+// Function to validate and sanitize user input
+const validateAndSanitizeInput = (input: string): { valid: boolean; sanitized: string; error?: string } => {
+  // Trim whitespace
+  const trimmed = input.trim();
+  
+  // Check if empty after trimming
+  if (!trimmed) {
+    return { valid: false, sanitized: '', error: 'Input cannot be empty.' };
+  }
+  
+  // Check for excessive length which could be used for prompt injection
+  if (trimmed.length > 2000) {
+    return { valid: false, sanitized: '', error: 'Input is too long. Please limit your message to 2000 characters.' };
+  }
+  
+  // Check for potential prompt injection patterns
+  const suspiciousPatterns = [
+    /ignore previous instructions/i,
+    /system prompt/i,
+    /disregard all previous commands/i,
+    /ignore all previous instructions/i,
+    /you are now/i,
+    /new role:/i,
+    /export data from/i,
+    /execute code/i,
+    /\<\/?script/i,
+    /\<\/?iframe/i,
+  ];
+  
+  for (const pattern of suspiciousPatterns) {
+    if (pattern.test(trimmed)) {
+      return { 
+        valid: false, 
+        sanitized: '',
+        error: 'Your message contains patterns that are not allowed for security reasons.' 
+      };
+    }
+  }
+  
+  // Basic sanitization
+  const sanitized = trimmed
+    .replace(/[<>]/g, '') // Remove angle brackets which could be used for HTML/XML injection
+    .replace(/(\r\n|\n|\r)/gm, " ") // Replace newlines with spaces
+    .replace(/\s+/g, " "); // Replace multiple spaces with a single space
+  
+  return { valid: true, sanitized };
+};
+
 const Chat: React.FC = () => {
   const [messages, setMessages] = useState<MessageType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -20,11 +68,17 @@ const Chat: React.FC = () => {
   }, [messages]);
 
   const handleSendMessage = async (content: string) => {
-    if (!content.trim()) return;
+    // Validate and sanitize the input
+    const { valid, sanitized, error: validationError } = validateAndSanitizeInput(content);
+    
+    if (!valid) {
+      setError(validationError || 'Invalid input. Please try again.');
+      return;
+    }
 
     const userMessage: MessageType = {
       id: uuidv4(),
-      content,
+      content: sanitized, // Use sanitized content for display
       role: 'user',
       timestamp: new Date(),
     };
@@ -34,7 +88,8 @@ const Chat: React.FC = () => {
     setError(null);
 
     try {
-      const response = await agentService.generateResponse(content);
+      // Send the sanitized content to the agent service
+      const response = await agentService.generateResponse(sanitized);
       
       const assistantMessage: MessageType = {
         id: uuidv4(),
@@ -112,4 +167,4 @@ const Chat: React.FC = () => {
   );
 };
 
-export default Chat; 
+export default Chat;
